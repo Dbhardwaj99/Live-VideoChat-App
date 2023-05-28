@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	// import handlers "internal/handlers"
+	w "videochat-app/pkg/webrtc"
 	"videochat-app/internal/handlers"
 
 	"github.com/gofiber/fiber/v2"
@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	addr = flag.String("addr, ':'", os.Getenv("PORT"), "")
+	addr = flag.String("addr", ":"+os.Getenv("PORT"), "")
 	cert = flag.String("cert", "", "")
 	key  = flag.String("key", "", "")
 )
@@ -48,8 +48,30 @@ func Run() error {
 
 	app.Get("/stream/:ssuid", handlers.Stream)
 
-	app.Get("/stream/:ssuid/ws", websocket.New(handlers.StreamWs))
-	app.Get("/stream/:ssuid/chat/ws", handlers.StreamChatWs)
+	app.Get("/stream/:ssuid/ws", websocket.New(handlers.StreamWs, websocket.Config{
+		HandshakeTimeout: 10 * time.Second,
+	}))
+
+	app.Get("/stream/:ssuid/chat/ws", websocket.New(handlers.StreamChatWs))
 	app.Get("/stream/:ssuid/viewer/ws", websocket.New(handlers.StreamViewerWs))
 
+	// Static files
+	app.Static("/", "./assets")
+
+
+	w.Rooms = make(map[string]*w.Room)
+	w.Streams = make(map[string]*w.Stream)
+    go dispatchKeyFrame()
+	if *cert != ""{
+		return app.ListenTLS(*addr, *cert, *key)
+	}
+	return app.Listen(*addr)
+}
+
+func dispatchKeyFrames() {
+	for range time.NewTicker(time.Second * 3).C {
+		for _, room := range w.Rooms {
+			room.Peers.DispatchKeyFrame()
+		}
+	}
 }
