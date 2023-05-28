@@ -23,6 +23,6 @@ func RoomConn(c *websocket.Conn, p *Peers) {
 		Mutex:          sync.Mutex{},
 	}
 
-	peer := NewPeer(c, peers)
+	peer := newPeer(c, peers)
 	peer.Listen()
 }
