@@ -1,9 +1,16 @@
 package chat
 
 import (
+	"bytes"
+	"log"
 	"time"
 
 	"github.com/fasthttp/websocket"
+)
+
+var (
+	newline = []byte{'\n'}
+	space   = []byte{' '}
 )
 
 const (
@@ -19,6 +26,11 @@ type Client struct {
 	Send chan []byte
 }
 
+var upgrader = websocket.FastHTTPUpgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
 func (c *Client) readPump() {
 	defer func() {
 		c.Hub.unregister <- c
@@ -32,15 +44,62 @@ func (c *Client) readPump() {
 	for {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
 			break
 		}
-
+		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
 		c.Hub.broadcast <- message
 	}
 }
 
 func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
+
+	for {
+		select {
+		case message, ok := <-c.Send:
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			w, err := c.Conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+
+			w.Write(message)
+
+			n := len(c.Send)
+			for i := 0; i < n; i++ {
+				w.Write(newline)
+				w.Write(<-c.Send)
+			}
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
-func PeerChatConn(conn *websocket.Conn) {
+func PeerChatConn(c *websocket.Conn, hub *Hub) {
+	client := &Client{Hub: hub, Conn: c, Send: make(chan []byte, 256)}
+	client.Hub.register <- client
+
+	go client.writePump()
+	client.readPump()
 }
