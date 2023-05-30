@@ -26,10 +26,10 @@ type Client struct {
 	Send chan []byte
 }
 
-var upgrader = websocket.FastHTTPUpgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
+// var upgrader = websocket.FastHTTPUpgrader{
+// 	ReadBufferSize:  1024,
+// 	WriteBufferSize: 1024,
+// }
 
 func (c *Client) readPump() {
 	defer func() {

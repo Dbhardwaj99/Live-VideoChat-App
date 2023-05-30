@@ -3,9 +3,8 @@ package handlers
 import (
 	"fmt"
 	"os"
-	"time"
-
 	w "videochat-app/pkg/webrtc"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	guuid "github.com/google/uuid"
@@ -22,11 +21,20 @@ func Room(c *fiber.Ctx) error {
 		return c.Redirect("/")
 	}
 
-	uuid, suuid,_ := createOrGetRoom(uuid)
-	return c.Render("room", fiber.Map{
-		"uuid": uuid,
-		"room": room,
-	})
+	ws := "ws"
+	if os.Getenv("APP_ENV") == "production" {
+		ws = "wss"
+	}
+
+	uuid, suuid, _ := createOrGetRoom(uuid)
+	return c.Render("peer", fiber.Map{
+		"RoomWSAddr":   fmt.Sprintf("%s://%s/room/%s/ws", ws, c.Hostname(), uuid),
+		"RoomLink":     fmt.Sprintf("%s://%s/room/%s", c.Protocol(), c.Hostname(), uuid),
+		"ChatWSAddr":   fmt.Sprintf("%s://%s/room/%s/chat/ws", ws, c.Hostname(), uuid),
+		"StreamLink":   fmt.Sprintf("%s://%s/stream/%s", c.Protocol(), c.Hostname(), suuid),
+		"ViewerWSAddr": fmt.Sprintf("%s://%s/room/%s/viewer/ws", ws, c.Hostname(), uuid),
+		"Type":         "room",
+	}, "layouts/main")
 }
 
 func RoomWs(c *websocket.Conn) {
@@ -35,7 +43,7 @@ func RoomWs(c *websocket.Conn) {
 		return
 	}
 
-	_,_, room := createOrGetRoom(uuid)
+	_, _, room := createOrGetRoom(uuid)
 	w.RoomConn(c, room.Peers)
 }
 
@@ -55,7 +63,14 @@ func RoomViewerWs(c *websocket.Conn) {
 		return
 	}
 
-	_,_, room := createOrGetRoom(uuid)
+	w.RoomLock.Lock()
+	if peer, ok := w.Rooms[uuid]; ok {
+		w.RoomLock.Unlock()
+		roomViewerConn(c, peer.Peers)
+		return
+	}
+	w.RoomLock.Unlock()
+
 }
 
 func roomViewerConn(c *websocket.Conn, p *w.Peers) {
@@ -65,4 +80,4 @@ func roomViewerConn(c *websocket.Conn, p *w.Peers) {
 type websocketMessage struct {
 	Event string `json:"event"`
 	Data  string `json:"data"`
-}	
+}
